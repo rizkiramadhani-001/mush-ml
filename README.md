@@ -1,5 +1,18 @@
 # MUSH ML
 
+Forecasting service for sensor data in MUSH fermentation monitoring.
+
+**Stack:** Python, FastAPI, scikit-learn
+
+## Portfolio snapshot
+
+- Validated `POST /predict` API for sensor samples and forecast horizons
+- Linear regression model with chronological train and test splits
+- MAE, RMSE, and R² metrics in the response
+- Unit tests for model behavior and edge cases
+
+**Related repositories:** [MUSH Server](https://github.com/rizkiramadhani-001/mush-server) · [MUSH React](https://github.com/rizkiramadhani-001/mush-react)
+
 Layanan inferensi untuk dashboard MUSH: regresi linear per parameter sensor
 dengan horizon 1 hari dan 7 hari. Memakai FastAPI + scikit-learn, tidak
 menyentuh database.
