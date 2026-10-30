@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Annotated
 
 import uvicorn
-from fastapi import FastAPI
+import joblib
+from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from config import FORECAST_DAYS
-from model import Sample, forecast_series
+from config import FORECAST_DAYS, MODEL_DIR
+from model import forecast_series
 
 
 def _to_utc(value: datetime) -> datetime:
@@ -38,16 +40,9 @@ class SampleIn(BaseModel):
 class PredictRequest(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
-    samples: dict[str, list[SampleIn]]
+    batch_id: int = Field(gt=0)
     horizons: list[Annotated[int, Field(gt=0)]] | None = None
     now: datetime | None = None
-
-    @field_validator("samples")
-    @classmethod
-    def _not_empty(cls, value: dict[str, list[SampleIn]]) -> dict[str, list[SampleIn]]:
-        if not value:
-            raise ValueError("samples wajib berisi minimal satu parameter")
-        return value
 
     @field_validator("now")
     @classmethod
@@ -56,6 +51,17 @@ class PredictRequest(BaseModel):
 
 
 app = FastAPI(title="MUSH ML", version="0.1.0")
+
+
+@lru_cache(maxsize=32)
+def load_model(batch_id: int) -> dict:
+    path = MODEL_DIR / f"batch-{batch_id}.joblib"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail=f"Model batch {batch_id} belum dilatih")
+    artifact = joblib.load(path)
+    if artifact["batch_id"] != batch_id:
+        raise HTTPException(status_code=503, detail="Identitas model tidak sesuai batch")
+    return artifact
 
 
 @app.exception_handler(RequestValidationError)
@@ -75,14 +81,11 @@ def health() -> dict:
 def predict(payload: PredictRequest) -> dict:
     days = tuple(sorted(set(payload.horizons))) if payload.horizons else FORECAST_DAYS
     now = payload.now or datetime.now(timezone.utc)
+    artifact = load_model(payload.batch_id)
 
     predictions = {
-        key: forecast_series(
-            [Sample(t=item.t, value=item.value) for item in items],
-            days,
-            now,
-        )
-        for key, items in payload.samples.items()
+        key: forecast_series(trained, days, now)
+        for key, trained in artifact["parameters"].items()
     }
 
     return {

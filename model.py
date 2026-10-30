@@ -51,17 +51,14 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def forecast_series(
-    samples: list[Sample],
-    days: tuple[int, ...] = FORECAST_DAYS,
-    now: datetime | None = None,
-) -> list[dict]:
+def train_series(samples: list[Sample]) -> dict:
     if len(samples) < 2:
-        return []
+        raise ValueError("Training membutuhkan minimal 2 sampel per parameter")
 
-    at = now or datetime.now(timezone.utc)
     ordered = sorted(samples, key=lambda sample: sample.t)
     origin = ordered[0].t
+    if ordered[-1].t == origin:
+        raise ValueError("Training membutuhkan minimal 2 waktu berbeda")
 
     xs = np.array(
         [[(sample.t - origin).total_seconds() / 3600] for sample in ordered],
@@ -74,6 +71,23 @@ def forecast_series(
     metrics = _evaluate(xs[split:], ys[split:], train)
 
     model = LinearRegression().fit(xs, ys)
+    return {
+        "estimator": model,
+        "origin": origin,
+        "last_sample": ordered[-1].t,
+        "sample_count": len(ordered),
+        "metrics": None if metrics is None else asdict(metrics),
+    }
+
+
+def forecast_series(
+    trained: dict,
+    days: tuple[int, ...] = FORECAST_DAYS,
+    now: datetime | None = None,
+) -> list[dict]:
+    at = now or datetime.now(timezone.utc)
+    model = trained["estimator"]
+    origin = trained["origin"]
 
     forecasts = []
     for day in days:
@@ -85,7 +99,7 @@ def forecast_series(
                 "hari": day,
                 "waktu": _iso(target),
                 "nilai": round(value, 1),
-                "metrik": None if metrics is None else asdict(metrics),
+                "metrik": trained["metrics"],
             }
         )
     return forecasts
